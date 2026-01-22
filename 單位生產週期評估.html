@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>瑞全產能決策系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .active-tab { 
+            border-bottom: 4px solid #2563eb; 
+            color: #2563eb; 
+            font-weight: bold; 
+            background-color: #eff6ff; 
+        }
+        .hidden-tab { display: none; }
+        .result-card { transition: all 0.3s ease; }
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { 
+            -webkit-appearance: none; 
+            margin: 0; 
+        }
+        input[type=number] {
+            -moz-appearance: textfield;
+        }
+        .tap-target { min-height: 44px; }
+        .mold-input {
+            background-color: #fff7ed;
+            color: #c2410c;
+            border-color: #ffedd5;
+        }
+        .mold-input:focus {
+            border-color: #f97316;
+            ring: #f97316;
+        }
+        
+        /* 機台卡片與開關樣式 */
+        .machine-card { transition: all 0.3s; }
+        .machine-card.night-mode {
+            background-color: #eff6ff; /* 藍色底代表有夜班 */
+            border-left: 5px solid #3b82f6; /* 藍色側邊條 */
+        }
+        
+        /* 說明區塊動畫 */
+        details > summary {
+            list-style: none;
+        }
+        details > summary::-webkit-details-marker {
+            display: none;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen pb-32">
+
+    <!-- Header -->
+    <header class="bg-slate-800 text-white p-4 shadow-lg sticky top-0 z-30">
+        <h1 class="text-xl font-bold text-center tracking-wide">🏭 瑞全產能看板 (明細版)</h1>
+        
+        <!-- Collapsible Info Box -->
+        <details class="mt-2 bg-slate-700 rounded-lg text-xs open:bg-slate-600 transition-all duration-300">
+            <summary class="p-2 cursor-pointer text-center font-bold text-slate-300 hover:text-white select-none flex items-center justify-center gap-2">
+                <span>ℹ️ 點擊查看操作邏輯與定義</span>
+                <span class="transform transition-transform duration-200" :class="open ? 'rotate-180' : ''">▼</span>
+            </summary>
+            <div class="p-3 border-t border-slate-500 text-left space-y-3">
+                
+                <!-- Section 1: Operation Logic -->
+                <div>
+                    <span class="text-yellow-400 font-bold text-sm">👉 操作順序 (防呆機制)：</span>
+                    <ol class="list-decimal list-inside pl-1 text-slate-200 mt-1 space-y-1">
+                        <li>先增加上方的 <span class="text-indigo-300 font-bold">「🌙 夜班人數」</span>。</li>
+                        <li>再開啟機台卡片上的 <span class="text-blue-300 font-bold">「夜班開關」</span>。</li>
+                        <li class="text-gray-400 italic">限制：開啟的機台數不可超過夜班人數 (1人顧1機)。</li>
+                    </ol>
+                </div>
+
+                <!-- Section 2: Capacity Definition -->
+                <div>
+                    <span class="text-yellow-400 font-bold text-sm">⚙️ 產能定義 (嫁動率分母)：</span>
+                    <ul class="list-disc list-inside pl-1 text-slate-200 mt-1 space-y-1">
+                        <li>
+                            <span class="bg-gray-500 text-white px-1 rounded text-[10px]">日班機台</span> 
+                            <b>11 小時</b> / 天 
+                            <span class="text-gray-400 text-[10px]">(08:00~20:30)</span>
+                        </li>
+                        <li>
+                            <span class="bg-blue-600 text-white px-1 rounded text-[10px]">夜班機台</span> 
+                            <b>22 小時</b> / 天 
+                            <span class="text-gray-400 text-[10px]">(日11H + 夜11H)</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Section 3: Cycle -->
+                <div class="border-t border-slate-600 pt-2">
+                    <span class="text-yellow-400 font-bold text-sm">📅 計算週期：</span>
+                    <span class="text-slate-200 block mt-1">週三 08:00 起 ～ 下週二 20:30 止 (共5工作天)</span>
+                </div>
+            </div>
+        </details>
+    </header>
+
+    <!-- Tab Navigation -->
+    <nav class="flex bg-white shadow-sm sticky top-[90px] z-20 border-b border-gray-200">
+        <button onclick="switchTab('unit1')" id="tab-unit1" class="flex-1 py-3 text-lg font-bold text-gray-500 hover:text-gray-700 transition-colors">製一</button>
+        <button onclick="switchTab('unit2')" id="tab-unit2" class="flex-1 py-3 text-lg font-bold text-gray-500 hover:text-gray-700 transition-colors">製二</button>
+        <button onclick="switchTab('unit3')" id="tab-unit3" class="flex-1 py-3 text-lg font-bold text-gray-500 hover:text-gray-700 transition-colors">製三</button>
+    </nav>
+
+    <!-- Content Area -->
+    <main class="p-4 max-w-md mx-auto relative z-10">
+        
+        <!-- Unit Info Section -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-4">
+            <h2 class="font-bold text-gray-800 text-lg mb-3 border-b border-gray-100 pb-2" id="unit-title-display">製一組</h2>
+            
+            <div class="grid grid-cols-2 gap-4">
+                <div class="bg-blue-50 rounded-lg p-2 border border-blue-100 flex flex-col items-center">
+                    <span class="text-xs font-bold text-blue-500 mb-1">☀️ 日班人數</span>
+                    <div class="flex items-center justify-center w-full">
+                        <button onclick="adjustStaff('day', -1)" class="text-blue-400 font-bold px-2 py-1 text-xl active:text-blue-600">-</button>
+                        <input type="number" id="staff-count-day" value="5" oninput="updateStaffValue()" readonly
+                            class="w-10 bg-transparent border-none p-0 text-center text-2xl font-black text-blue-600 focus:ring-0 outline-none">
+                        <button onclick="adjustStaff('day', 1)" class="text-blue-600 font-bold px-2 py-1 text-xl active:text-blue-800">+</button>
+                    </div>
+                </div>
+
+                <div class="bg-indigo-50 rounded-lg p-2 border border-indigo-100 flex flex-col items-center relative">
+                    <span class="text-xs font-bold text-indigo-500 mb-1">🌙 夜班人數</span>
+                    <div class="flex items-center justify-center w-full">
+                        <button onclick="adjustStaff('night', -1)" class="text-indigo-400 font-bold px-2 py-1 text-xl active:text-indigo-600">-</button>
+                        <input type="number" id="staff-count-night" value="1" oninput="updateStaffValue()" readonly
+                            class="w-10 bg-transparent border-none p-0 text-center text-2xl font-black text-indigo-600 focus:ring-0 outline-none">
+                        <button onclick="adjustStaff('night', 1)" class="text-indigo-600 font-bold px-2 py-1 text-xl active:text-indigo-800">+</button>
+                    </div>
+                    <div class="absolute -bottom-2 left-0 right-0 text-center">
+                        <span class="text-[9px] text-indigo-400 bg-white px-1 border border-indigo-100 rounded">可開 <span id="max-night-machines">1</span> 台夜班</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="text-center mt-4 text-xs text-gray-400">
+                總人力: <span id="total-staff-display" class="font-bold text-gray-600">6</span> 人
+            </div>
+        </div>
+
+        <!-- Containers -->
+        <div id="container-unit1"></div>
+        <div id="container-unit2" class="hidden-tab"></div>
+        <div id="container-unit3" class="hidden-tab"></div>
+
+        <!-- Summary Result -->
+        <div id="result-area" class="result-card rounded-2xl p-5 shadow-xl text-center border-t-4 border-gray-300 bg-white mb-6 mt-6">
+            <div class="flex justify-center items-center space-x-2 mb-2">
+                <div id="status-icon" class="text-4xl filter drop-shadow-md">⏳</div>
+                <h2 id="status-title" class="text-xl font-black text-gray-800">等待輸入</h2>
+            </div>
+            
+            <div class="bg-slate-50 rounded-lg p-3 border border-slate-200 mb-3">
+                <p class="text-sm text-gray-700 mb-3 font-bold bg-slate-200 inline-block px-3 py-1 rounded-full">每人每一天需工作幾小時？</p>
+                <div class="flex justify-center items-center text-gray-700 font-mono text-sm flex-wrap gap-2">
+                    
+                    <div class="flex flex-col items-center">
+                        <span class="text-xs text-gray-400 font-bold mb-1">總工時+換模</span>
+                        <div class="bg-white px-2 py-1 rounded border border-gray-200 min-w-[3rem] text-center">
+                            <span id="formula-total" class="font-bold text-lg text-gray-700">0</span>
+                        </div>
+                    </div>
+
+                    <div class="text-gray-400 font-light text-xl pt-4">÷</div>
+
+                    <div class="flex flex-col items-center">
+                        <span class="text-xs text-gray-400 font-bold mb-1">總人數</span>
+                        <div class="bg-white px-2 py-1 rounded border border-gray-200 min-w-[2rem] text-center">
+                            <span id="formula-staff" class="font-bold text-lg text-gray-700">6</span>
+                        </div>
+                    </div>
+
+                    <div class="text-gray-400 font-light text-xl pt-4">÷</div>
+
+                    <div class="flex flex-col items-center">
+                        <span class="text-xs text-blue-500 font-bold mb-1">工作天數</span>
+                        <div class="flex items-center bg-white rounded border border-blue-200 shadow-sm">
+                            <button onclick="adjustDays(-1)" class="px-2 text-gray-400 hover:text-blue-600 font-bold bg-gray-50 hover:bg-blue-50 rounded-l active:bg-blue-100 h-full border-r border-gray-100">-</button>
+                            <input id="work-days" type="number" value="5" readonly class="w-8 text-center font-bold text-lg text-blue-600 outline-none">
+                            <button onclick="adjustDays(1)" class="px-2 text-gray-400 hover:text-blue-600 font-bold bg-gray-50 hover:bg-blue-50 rounded-r active:bg-blue-100 h-full border-l border-gray-100">+</button>
+                        </div>
+                    </div>
+
+                    <div class="text-gray-400 font-light text-xl pt-4">=</div>
+
+                    <div class="flex flex-col items-center">
+                        <span class="text-xs text-blue-500 font-bold mb-1">每日工時</span>
+                        <div class="bg-blue-50 px-4 py-2 rounded-lg border-2 border-blue-200 shadow-sm text-center min-w-[5rem]">
+                            <span id="load-value" class="font-black text-4xl text-blue-600 leading-none">0.0</span>
+                            <span class="text-[10px] text-blue-400 block pt-1 font-bold">小時/日</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="advice-text" class="text-sm text-gray-600 font-medium leading-relaxed px-2 bg-gray-50 p-2 rounded border border-gray-100">
+                請依工單逐筆輸入時數
+            </div>
+        </div>
+
+        <!-- Detailed Table -->
+        <div class="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden mb-6">
+            <div class="bg-gray-50 px-4 py-2 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="font-bold text-gray-700 text-sm">📊 機台詳細數據</h3>
+                <span class="text-[10px] text-gray-400">分母: 手動設定 (11H/22H)</span>
+            </div>
+            <table class="w-full text-xs text-left">
+                <thead class="bg-gray-100 text-gray-500 uppercase font-bold tracking-wider">
+                    <tr>
+                        <th class="px-2 py-3 pl-4">機台</th>
+                        <th class="px-2 py-3 text-right text-blue-600">生產</th>
+                        <th class="px-2 py-3 text-right text-orange-500">換模</th>
+                        <th class="px-2 py-3 text-right">總工時</th>
+                        <th class="px-2 py-3 text-center">嫁動率</th>
+                    </tr>
+                </thead>
+                <tbody id="summary-table-body" class="divide-y divide-gray-100">
+                    <!-- Rows -->
+                </tbody>
+            </table>
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-40 p-3 safe-area-bottom">
+        <div class="max-w-md mx-auto flex justify-between items-center">
+            <div class="pl-1">
+                <p class="text-[10px] text-gray-400 uppercase font-bold tracking-wider">總工時</p>
+                <p class="font-black text-xl text-slate-700 leading-none"><span id="total-hours-label">0</span> <span class="text-sm font-normal text-gray-400">h</span></p>
+            </div>
+            <button onclick="resetCurrentUnit()" class="bg-slate-100 active:bg-slate-200 text-slate-500 px-4 py-2 rounded-lg text-xs font-bold transition-colors border border-slate-200">
+                清空本頁
+            </button>
+        </div>
+    </footer>
+
+    <script>
+        const units = {
+            unit1: { 
+                id: "unit1",
+                title: "製一組",
+                defaultStaffDay: 5,
+                defaultStaffNight: 1,
+                currentStaffDay: 5, 
+                currentStaffNight: 1,
+                machines: [
+                    "161 (210T)", "213 (210T)", "211 (210T)", "212 (210T)", 
+                    "011 (250T)", "401 (400T)", "502 (450T)", "501 (550T)", 
+                    "503 (550T)", "601 (600T)", "602 (600T)"
+                ] 
+            },
+            unit2: { 
+                id: "unit2",
+                title: "製二組",
+                defaultStaffDay: 5,
+                defaultStaffNight: 1,
+                currentStaffDay: 5,
+                currentStaffNight: 1,
+                machines: ["101 (800T)", "102 (800T)", "121 (1200T)", "151 (1500T)", "152 (1500T)"]
+            },
+            unit3: { 
+                id: "unit3",
+                title: "製三組",
+                defaultStaffDay: 4,
+                defaultStaffNight: 0,
+                currentStaffDay: 4,
+                currentStaffNight: 0,
+                machines: ["221 (2200T)", "312 (2700T)", "311 (2700T)", "321 (3200T)"]
+            }
+        };
+
+        let activeUnitId = 'unit1';
+        let currentWorkDays = 5;
+
+        function init() {
+            Object.keys(units).forEach(key => {
+                const unit = units[key];
+                const container = document.getElementById(`container-${unit.id}`);
+                
+                unit.machines.forEach(m => {
+                    let rowsHtml = '';
+                    for(let i=0; i<2; i++) {
+                        rowsHtml += generateRowHtml(i+1, m, unit.id);
+                    }
+
+                    container.innerHTML += `
+                        <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 machine-card mb-4" id="card-${unit.id}-${m}" data-machine="${m}" data-unit="${unit.id}">
+                            <div class="flex justify-between items-center mb-3 pb-2 border-b border-gray-50 header-row">
+                                <div class="flex items-center gap-2">
+                                    <span class="font-bold text-gray-800 text-lg machine-title">${m}</span>
+                                    <label class="inline-flex items-center cursor-pointer ml-2">
+                                        <input type="checkbox" class="sr-only peer night-toggle" onchange="toggleNightShift(this, '${unit.id}', '${m}')">
+                                        <div class="relative w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500"></div>
+                                        <span class="ms-1 text-xs font-medium text-gray-400 peer-checked:text-blue-600">夜班</span>
+                                    </label>
+                                </div>
+                                <span class="text-xs bg-gray-100 text-gray-400 px-3 py-1 rounded-full font-bold font-mono subtotal-label" id="subtotal-${unit.id}-${m}">0.0h</span>
+                            </div>
+                            <div class="input-rows-container space-y-2">
+                                ${rowsHtml}
+                            </div>
+                            <button onclick="addInputRow(this, '${m}', '${unit.id}')" class="w-full py-2 mt-3 text-xs font-bold text-gray-400 border border-dashed border-gray-300 rounded-lg hover:bg-blue-50 hover:text-blue-500 hover:border-blue-300 transition-all active:scale-95">
+                                + 新增工單
+                            </button>
+                        </div>
+                    `;
+                });
+            });
+            switchTab('unit1');
+        }
+
+        function switchTab(unitId) {
+            document.querySelectorAll('[id^="container-unit"]').forEach(el => el.classList.add('hidden-tab'));
+            document.getElementById(`container-${unitId}`).classList.remove('hidden-tab');
+            
+            document.querySelectorAll('nav button').forEach(btn => {
+                btn.className = "flex-1 py-3 text-lg font-bold text-gray-500 hover:text-gray-700 transition-colors border-b-2 border-transparent";
+            });
+            const activeBtn = document.getElementById('tab-' + unitId);
+            activeBtn.className = "flex-1 py-3 text-lg font-bold text-blue-600 bg-blue-50 border-b-2 border-blue-600 transition-colors";
+
+            activeUnitId = unitId;
+            document.getElementById('unit-title-display').innerText = units[unitId].title;
+            
+            document.getElementById('staff-count-day').value = units[unitId].currentStaffDay;
+            document.getElementById('staff-count-night').value = units[unitId].currentStaffNight;
+            document.getElementById('max-night-machines').innerText = units[unitId].currentStaffNight;
+            
+            runUpdate();
+        }
+
+        function generateRowHtml(index, machineName, unitId) {
+            return `
+                <div class="flex items-center space-x-2">
+                    <span class="text-gray-300 text-xs font-mono w-4 text-center pt-2">${index}.</span>
+                    <div class="flex-grow">
+                        <label class="text-[10px] text-gray-400 block mb-1 pl-1">生產工時</label>
+                        <div class="flex items-center bg-gray-50 rounded-lg border border-gray-200 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 transition-all tap-target">
+                            <input type="number" inputmode="numeric" pattern="[0-9]*" placeholder="0" class="h-input w-full bg-transparent p-2 text-center font-bold text-gray-700 outline-none text-lg" 
+                                oninput="runUpdate()" onfocus="this.select()">
+                            <span class="text-gray-400 text-xs font-bold px-1 border-r border-gray-200">時</span>
+                            <input type="number" inputmode="numeric" pattern="[0-9]*" placeholder="0" class="m-input w-full bg-transparent p-2 text-center font-bold text-gray-700 outline-none text-lg" 
+                                oninput="runUpdate()" onfocus="this.select()">
+                            <span class="text-gray-400 text-xs font-bold px-1">分</span>
+                        </div>
+                    </div>
+                    <div class="w-20">
+                        <label class="text-[10px] text-orange-400 block mb-1 pl-1 font-bold">換模(分)</label>
+                        <div class="flex items-center bg-orange-50 rounded-lg border border-orange-200 focus-within:border-orange-400 focus-within:ring-2 focus-within:ring-orange-100 transition-all tap-target">
+                            <input type="number" inputmode="numeric" pattern="[0-9]*" value="40" class="mold-input w-full bg-transparent p-2 text-center font-bold text-orange-700 outline-none text-lg" 
+                                oninput="runUpdate()" onfocus="this.select()">
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function addInputRow(btn, machineName, unitId) {
+            const container = btn.previousElementSibling;
+            const newIndex = container.children.length + 1;
+            const newRow = document.createElement('div');
+            newRow.innerHTML = generateRowHtml(newIndex, machineName, unitId).trim();
+            container.appendChild(newRow.firstChild);
+            runUpdate();
+        }
+
+        function getNightMachineCount() {
+            const container = document.getElementById(`container-${activeUnitId}`);
+            if (!container) return 0;
+            return container.querySelectorAll('.night-toggle:checked').length;
+        }
+
+        function toggleNightShift(checkbox, unitId, machineName) {
+            const nightStaff = parseInt(document.getElementById('staff-count-night').value) || 0;
+            const currentActiveMachines = getNightMachineCount();
+            
+            if (checkbox.checked) {
+                if (currentActiveMachines > nightStaff) {
+                    checkbox.checked = false;
+                    alert(`夜班人力不足！\n目前設定夜班僅 ${nightStaff} 人，無法開啟第 ${currentActiveMachines} 台機台。\n\n請先在上方增加「🌙 夜班人數」。`);
+                    return;
+                }
+                const card = document.getElementById(`card-${unitId}-${machineName}`);
+                card.classList.add('night-mode');
+            } else {
+                const card = document.getElementById(`card-${unitId}-${machineName}`);
+                card.classList.remove('night-mode');
+            }
+            
+            runUpdate();
+        }
+
+        function adjustStaff(type, delta) {
+            const inputId = type === 'day' ? 'staff-count-day' : 'staff-count-night';
+            const input = document.getElementById(inputId);
+            let val = parseInt(input.value) || 0;
+            
+            if (type === 'night' && delta < 0) {
+                const activeMachines = getNightMachineCount();
+                if (val - 1 < activeMachines) {
+                    alert(`無法減少夜班人數！\n目前有 ${activeMachines} 台機台開啟夜班，必須保留至少 ${activeMachines} 人。\n\n請先關閉機台的夜班開關，再減少人數。`);
+                    return;
+                }
+            }
+            
+            val += delta;
+            if (val < 0) val = 0;
+            if (type === 'day' && val < 1) val = 1;
+            
+            input.value = val;
+            updateStaffValue();
+        }
+
+        function updateStaffValue() {
+            const valDay = parseInt(document.getElementById('staff-count-day').value) || 1;
+            const valNight = parseInt(document.getElementById('staff-count-night').value) || 0;
+            
+            units[activeUnitId].currentStaffDay = valDay;
+            units[activeUnitId].currentStaffNight = valNight;
+            
+            document.getElementById('total-staff-display').innerText = (valDay + valNight);
+            document.getElementById('max-night-machines').innerText = valNight;
+            runUpdate();
+        }
+
+        function adjustDays(delta) {
+            let val = currentWorkDays + delta;
+            if (val < 1) val = 1;
+            if (val > 7) val = 7;
+            currentWorkDays = val;
+            document.getElementById('work-days').value = currentWorkDays;
+            runUpdate();
+        }
+
+        function runUpdate() {
+            const container = document.getElementById(`container-${activeUnitId}`);
+            const staffDay = units[activeUnitId].currentStaffDay;
+            const staffNight = units[activeUnitId].currentStaffNight;
+            const totalStaff = staffDay + staffNight;
+
+            const cards = container.querySelectorAll('.machine-card');
+            const summaryBody = document.getElementById('summary-table-body');
+            let totalHoursAll = 0;
+            
+            summaryBody.innerHTML = '';
+
+            cards.forEach(card => {
+                const mName = card.getAttribute('data-machine');
+                const nightToggle = card.querySelector('.night-toggle');
+                const isNight = nightToggle ? nightToggle.checked : false;
+
+                const hoursPerDay = isNight ? 22 : 11;
+                const baselineHours = currentWorkDays * hoursPerDay;
+
+                const rows = card.querySelectorAll('.input-rows-container > div');
+                let prodSubtotal = 0;
+                let moldSubtotal = 0;
+                let orderCount = 0;
+
+                rows.forEach(row => {
+                    const hInput = row.querySelector('.h-input');
+                    const mInput = row.querySelector('.m-input');
+                    const moldInput = row.querySelector('.mold-input');
+                    
+                    const h = parseFloat(hInput.value) || 0;
+                    const m = parseFloat(mInput.value) || 0;
+                    const workHours = h + (m / 60);
+                    prodSubtotal += workHours;
+                    
+                    if (workHours > 0) {
+                        const moldMins = parseFloat(moldInput.value) || 0;
+                        moldSubtotal += moldMins / 60;
+                        orderCount++;
+                    }
+                });
+
+                const totalSubtotal = prodSubtotal + moldSubtotal;
+                totalHoursAll += totalSubtotal;
+
+                const subLabel = document.getElementById(`subtotal-${activeUnitId}-${mName}`);
+                if(subLabel) {
+                    subLabel.innerText = totalSubtotal > 0 ? totalSubtotal.toFixed(1) + "h" : "0.0h";
+                    // 燈號邏輯 (不變)
+                    const normalHours = currentWorkDays * (isNight ? 16 : 8);
+                    if (totalSubtotal > baselineHours) subLabel.className = "text-xs bg-red-100 text-red-600 px-3 py-1 rounded-full font-bold font-mono subtotal-label";
+                    else if (totalSubtotal > normalHours) subLabel.className = "text-xs bg-orange-100 text-orange-600 px-3 py-1 rounded-full font-bold font-mono subtotal-label";
+                    else if (totalSubtotal > 0) subLabel.className = "text-xs bg-blue-100 text-blue-600 px-3 py-1 rounded-full font-bold font-mono subtotal-label";
+                    else subLabel.className = "text-xs bg-gray-100 text-gray-400 px-3 py-1 rounded-full font-bold font-mono subtotal-label";
+                }
+
+                // 表格摘要 - 拆分顯示
+                const utilization = baselineHours > 0 ? (totalSubtotal / baselineHours) * 100 : 0;
+                
+                // 嫁動率徽章樣式
+                let badgeClass = "bg-gray-100 text-gray-400";
+                if (totalSubtotal > 0) {
+                    if (utilization > 100) badgeClass = "bg-red-500 text-white animate-pulse";
+                    else if (utilization > 72.7) badgeClass = "bg-orange-400 text-white"; // > 8h/11h
+                    else badgeClass = "bg-green-100 text-green-700";
+                }
+
+                const shiftBadge = isNight ? '<span class="inline-flex items-center gap-1 text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded-full ml-1 shadow-sm">🌙</span>' : '';
+                
+                // 生產、換模工時顯示 (若為0則灰顯)
+                const prodDisplay = prodSubtotal > 0 ? `<span class="text-blue-600 font-bold">${prodSubtotal.toFixed(1)}</span>` : '<span class="text-gray-300">0.0</span>';
+                const moldDisplay = moldSubtotal > 0 ? `<span class="text-orange-500 font-bold">${moldSubtotal.toFixed(1)}</span> <span class="text-[9px] text-gray-400">(${orderCount}張)</span>` : '<span class="text-gray-300">0.0</span>';
+                const totalDisplay = totalSubtotal > 0 ? `<span class="text-gray-800 font-black">${totalSubtotal.toFixed(1)}h</span>` : '<span class="text-gray-300">0.0h</span>';
+
+                summaryBody.innerHTML += `
+                    <tr class="border-b border-gray-50 last:border-none hover:bg-gray-50 transition-colors">
+                        <td class="px-2 py-3 pl-4 font-bold text-gray-700 flex items-center">
+                            ${mName} ${shiftBadge}
+                        </td>
+                        <td class="px-2 py-3 text-right font-mono">${prodDisplay}</td>
+                        <td class="px-2 py-3 text-right font-mono">${moldDisplay}</td>
+                        <td class="px-2 py-3 text-right font-mono">${totalDisplay}</td>
+                        <td class="px-2 py-3 text-center">
+                            <span class="px-2 py-1 rounded-full text-xs font-bold font-mono ${badgeClass}">
+                                ${utilization.toFixed(0)}%
+                            </span>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            const safeStaffCount = totalStaff > 0 ? totalStaff : 1;
+            const dailyAvg = (totalHoursAll / safeStaffCount) / currentWorkDays;
+            updateResultCard(dailyAvg, totalHoursAll, safeStaffCount);
+        }
+
+        function updateResultCard(dailyAvg, total, staff) {
+            const resArea = document.getElementById('result-area');
+            const statusIcon = document.getElementById('status-icon');
+            const statusTitle = document.getElementById('status-title');
+            const adviceText = document.getElementById('advice-text');
+            const loadLabel = document.getElementById('load-value');
+            
+            document.getElementById('formula-total').innerText = total.toFixed(1);
+            document.getElementById('formula-staff').innerText = staff;
+            document.getElementById('total-hours-label').innerText = total.toFixed(1);
+            
+            loadLabel.innerText = dailyAvg.toFixed(1);
+
+            if (total === 0) {
+                resArea.className = "result-card rounded-2xl p-5 shadow-xl text-center border-t-4 border-gray-300 bg-white mb-6 mt-6";
+                statusIcon.innerText = "⏳";
+                statusTitle.innerText = "等待輸入";
+                statusTitle.className = "text-xl font-black text-gray-400";
+                adviceText.innerText = "請填寫工時，可手動開啟夜班開關";
+                loadLabel.className = "font-black text-3xl text-gray-400 leading-none";
+            } else if (dailyAvg > 11) {
+                resArea.className = "result-card rounded-2xl p-5 shadow-xl text-center border-t-4 border-red-500 bg-red-50 mb-6 mt-6";
+                statusIcon.innerText = "🚨";
+                statusTitle.innerText = "嚴重超載 (紅燈)";
+                statusTitle.className = "text-xl font-black text-red-600";
+                adviceText.innerHTML = `人均日工時 <b>${dailyAvg.toFixed(1)}</b> h > 11h 極限。<br>人力不足，請務必調人支援。`;
+                loadLabel.className = "font-black text-3xl text-red-600 leading-none";
+            } else if (dailyAvg > 8) {
+                resArea.className = "result-card rounded-2xl p-5 shadow-xl text-center border-t-4 border-orange-400 bg-orange-50 mb-6 mt-6";
+                statusIcon.innerText = "⚠️";
+                statusTitle.innerText = "需排加班 (黃燈)";
+                statusTitle.className = "text-xl font-black text-orange-600";
+                const overtime = (dailyAvg - 8).toFixed(1);
+                adviceText.innerHTML = `人均日工時 <b>${dailyAvg.toFixed(1)}</b> h。<br>每人每日需加班 <b>${overtime}</b> 小時。`;
+                loadLabel.className = "font-black text-3xl text-orange-600 leading-none";
+            } else {
+                resArea.className = "result-card rounded-2xl p-5 shadow-xl text-center border-t-4 border-green-500 bg-green-50 mb-6 mt-6";
+                statusIcon.innerText = "✅";
+                statusTitle.innerText = "產能充足 (綠燈)";
+                statusTitle.className = "text-xl font-black text-green-600";
+                adviceText.innerHTML = `人均日工時 <b>${dailyAvg.toFixed(1)}</b> h。<br>產能有餘裕，準時下班。`;
+                loadLabel.className = "font-black text-3xl text-green-600 leading-none";
+            }
+        }
+
+        function resetCurrentUnit() {
+            if(!confirm('確定要清空本頁面的所有輸入嗎？')) return;
+            const container = document.getElementById(`container-${activeUnitId}`);
+            container.querySelectorAll('.h-input, .m-input').forEach(input => input.value = '');
+            container.querySelectorAll('.mold-input').forEach(input => input.value = '40');
+            
+            // 重置開關
+            container.querySelectorAll('.night-toggle').forEach(t => t.checked = false);
+            container.querySelectorAll('.machine-card').forEach(c => c.classList.remove('night-mode'));
+            
+            document.getElementById('staff-count-night').value = 0;
+            units[activeUnitId].currentStaffNight = 0;
+            document.getElementById('total-staff-display').innerText = units[activeUnitId].currentStaffDay;
+            document.getElementById('max-night-machines').innerText = 0;
+
+            runUpdate();
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
